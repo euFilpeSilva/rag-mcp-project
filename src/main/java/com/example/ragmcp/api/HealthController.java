@@ -11,6 +11,12 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.client.RestClient;
 
+/**
+ * Endpoint {@code GET /api/health}: verifica rapidamente se as duas
+ * dependências externas críticas (Postgres e Ollama) estão respondendo,
+ * útil para diagnóstico manual e para checks de infraestrutura (ex:
+ * Docker healthcheck, monitoramento).
+ */
 @RestController
 @RequestMapping(path = "/api/health", produces = MediaType.APPLICATION_JSON_VALUE)
 public class HealthController {
@@ -37,6 +43,7 @@ public class HealthController {
         return new HealthResponse(status, postgres, ollama);
     }
 
+    /** Testa a conexão com o Postgres rodando um {@code SELECT 1} simples. */
     private String checkPostgres() {
         try {
             jdbcTemplate.queryForObject("SELECT 1", Integer.class);
@@ -46,6 +53,7 @@ public class HealthController {
         }
     }
 
+    /** Testa se o servidor Ollama está no ar chamando o endpoint de listagem de modelos. */
     private String checkOllama() {
         try {
             ollamaClient.get().uri("/api/tags").retrieve().toBodilessEntity();
@@ -55,6 +63,7 @@ public class HealthController {
         }
     }
 
+    /** {@code status} é "UP" só quando ambas as dependências estão UP; caso contrário "DEGRADED". */
     public record HealthResponse(String status, String postgres, String ollama) {
     }
 }

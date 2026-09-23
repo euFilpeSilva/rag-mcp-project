@@ -11,11 +11,17 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+/**
+ * Tratador global de exceções da camada REST: converte exceções em
+ * respostas HTTP consistentes (JSON com campo {@code error}), evitando
+ * vazar stack traces para o cliente.
+ */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
+    /** Erros de validação/entrada inválida viram HTTP 400 com mensagem amigável. */
     @ExceptionHandler({
             IllegalArgumentException.class,
             ConstraintViolationException.class,
@@ -25,6 +31,7 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(new ErrorResponse(toValidationMessage(exception)));
     }
 
+    /** Qualquer outra exceção não tratada vira HTTP 500 genérico (detalhes só vão para o log). */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleUnexpected(Exception exception) {
         log.error("Erro interno inesperado", exception);
@@ -32,6 +39,7 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse("Erro interno inesperado"));
     }
 
+    /** Monta uma mensagem legível listando os campos/violações inválidos. */
     private String toValidationMessage(Exception exception) {
         if (exception instanceof MethodArgumentNotValidException manve) {
             return manve.getBindingResult().getFieldErrors().stream()

@@ -20,6 +20,28 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+/**
+ * Implementação "na mão" (via JDBC puro) do contrato {@link EmbeddingStore}
+ * do LangChain4j, usando a extensão {@code pgvector} do Postgres como
+ * banco vetorial.
+ *
+ * <p>Por que implementar isso na mão em vez de usar uma integração
+ * pronta? Porque no momento em que este projeto foi escrito, o conector
+ * oficial {@code langchain4j-pgvector} ainda estava em versão beta, e
+ * esta classe permite controlar exatamente o schema da tabela
+ * {@code document_chunks} (incluindo colunas extras como
+ * {@code source_file}, {@code page_number} e {@code chunk_hash} — este
+ * último usado para não ingerir o mesmo chunk duas vezes).</p>
+ *
+ * <p>Conceito-chave: um "embedding" é um vetor de números (ex: 768
+ * posições/dimensões) que representa o significado de um texto. A
+ * extensão {@code pgvector} permite armazenar esses vetores em uma coluna
+ * do tipo {@code vector} e calcular a "distância" (aqui, distância de
+ * cosseno, operador {@code <=>}) entre vetores diretamente em SQL — é
+ * assim que a busca por similaridade funciona: quanto menor a distância
+ * (ou maior {@code 1 - distância}, chamado de similaridade), mais
+ * parecido semanticamente o chunk é com a pergunta.</p>
+ */
 public class JdbcPgVectorEmbeddingStore implements EmbeddingStore<TextSegment> {
 
     private static final Logger log = LoggerFactory.getLogger(JdbcPgVectorEmbeddingStore.class);
@@ -80,6 +102,12 @@ public class JdbcPgVectorEmbeddingStore implements EmbeddingStore<TextSegment> {
         return dimension;
     }
 
+    // --- Métodos "add" sem metadados: não são usados neste projeto ---
+    // O contrato EmbeddingStore original permite adicionar um embedding
+    // "puro", sem texto/metadados associados. Como aqui SEMPRE queremos
+    // guardar de qual arquivo/página o chunk veio, essas variantes são
+    // desabilitadas de propósito para forçar o uso de add(Embedding, TextSegment).
+
     @Override
     public String add(Embedding embedding) {
         throw new UnsupportedOperationException("Use add(Embedding, TextSegment) to preserve metadata");
@@ -90,6 +118,16 @@ public class JdbcPgVectorEmbeddingStore implements EmbeddingStore<TextSegment> {
         throw new UnsupportedOperationException("Use add(Embedding, TextSegment) to preserve metadata");
     }
 
+    /**
+     * Insere um chunk de documento (texto + metadados) junto com seu
+     * embedding no banco. É chamado uma vez por chunk durante a
+     * ingestão (ver {@code DocumentIngestionServiceImpl}).
+     *
+     * <p>O vetor é convertido para o formato textual que o Postgres
+     * entende (ex: {@code [0.12,0.87,...]}) e inserido via
+     * {@code CAST(? AS vector)}, que converte esse texto para o tipo
+     * nativo {@code vector} da extensão pgvector.</p>
+     */
     @Override
     public String add(Embedding embedding, TextSegment embedded) {
         String id = UUID.randomUUID().toString();
@@ -111,6 +149,7 @@ public class JdbcPgVectorEmbeddingStore implements EmbeddingStore<TextSegment> {
         throw new UnsupportedOperationException("Use addAll with embedded segments");
     }
 
+    /** Insere vários chunks em sequência, reaproveitando {@link #add}. */
     @Override
     public void addAll(List<String> ids, List<Embedding> embeddings, List<TextSegment> embedded) {
         for (int i = 0; i < embeddings.size(); i++) {
@@ -132,11 +171,35 @@ public class JdbcPgVectorEmbeddingStore implements EmbeddingStore<TextSegment> {
         throw new UnsupportedOperationException("Filtering delete is not supported");
     }
 
+    /** Apaga todos os chunks — usado principalmente nos testes, entre um teste e outro. */
     @Override
     public void removeAll() {
         jdbcTemplate.update("DELETE FROM " + tableName);
     }
 
+    /**
+     * O coração da busca RAG: dado o vetor da pergunta do usuário
+     * ({@code request.queryEmbedding()}), busca no Postgres os chunks
+     * mais parecidos semanticamente.
+     *
+     * <p>SQL explicado:</p>
+     * <ul>
+     *   <li>{@code embedding <=> vetor} — operador do pgvector que
+     *       calcula a distância de cosseno entre dois vetores (0 = idênticos,
+     *       2 = opostos).</li>
+     *   <li>{@code 1 - (embedding <=> vetor) AS similarity} — converte
+     *       distância em "similaridade" (1 = idêntico, quanto menor mais
+     *       diferente), mais intuitivo para o restante do código.</li>
+     *   <li>{@code WHERE similarity >= minScore} — descarta chunks
+     *       fracamente relacionados (o "limiar" configurado em
+     *       {@code rag.retrieval.min-similarity}, default 0.5). É essa
+     *       cláusula que faz o sistema dizer "não sei" quando a pergunta
+     *       não tem relação com os documentos ingeridos.</li>
+     *   <li>{@code ORDER BY ... ASC LIMIT maxResults} — pega os N chunks
+     *       mais próximos (menor distância = mais similar), onde N é o
+     *       "top-K" configurado (default 4).</li>
+     * </ul>
+     */
     @Override
     public EmbeddingSearchResult<TextSegment> search(EmbeddingSearchRequest request) {
         if (request.queryEmbedding() == null) {
@@ -159,6 +222,7 @@ public class JdbcPgVectorEmbeddingStore implements EmbeddingStore<TextSegment> {
         return new EmbeddingSearchResult<>(matches);
     }
 
+    /** Converte uma linha do ResultSet de volta em um objeto de domínio do LangChain4j. */
     private EmbeddingMatch<TextSegment> toMatch(ResultSet rs) throws SQLException {
         Metadata metadata = Metadata.from(Map.of(
                 SOURCE_FILE, rs.getString("source_file"),
@@ -171,6 +235,12 @@ public class JdbcPgVectorEmbeddingStore implements EmbeddingStore<TextSegment> {
         return new EmbeddingMatch<>(rs.getDouble("similarity"), rs.getString("id"), null, segment);
     }
 
+    /**
+     * Converte o vetor de floats do Java (ex: {@code [0.12f, 0.87f, ...]})
+     * para a representação textual que o Postgres/pgvector entende
+     * (ex: a string {@code "[0.12,0.87,...]"}), usada dentro do
+     * {@code CAST(? AS vector)} nas queries SQL acima.
+     */
     private String vectorToSqlLiteral(Embedding embedding) {
         float[] vector = embedding.vector();
         if (vector.length != dimension) {

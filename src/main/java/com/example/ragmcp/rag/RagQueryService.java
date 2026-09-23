@@ -2,6 +2,11 @@ package com.example.ragmcp.rag;
 
 import java.util.List;
 
+/**
+ * Contrato do serviço de consulta RAG (spec 02) — a peça central do
+ * projeto: transforma uma pergunta em resposta fundamentada em
+ * documentos previamente ingeridos.
+ */
 public interface RagQueryService {
 
     /**

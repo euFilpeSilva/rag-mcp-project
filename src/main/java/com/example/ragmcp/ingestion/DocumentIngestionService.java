@@ -3,6 +3,10 @@ package com.example.ragmcp.ingestion;
 import java.nio.file.Path;
 import java.util.List;
 
+/**
+ * Contrato do serviço de ingestão de documentos (spec 01). É a "porta de
+ * entrada" de dados para o RAG: sem ingestão, não há o que buscar depois.
+ */
 public interface DocumentIngestionService {
 
     /**

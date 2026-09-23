@@ -19,6 +19,11 @@ import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+/**
+ * Endpoints de ingestão de documentos: {@code POST /api/documents}
+ * (upload avulso de um arquivo) e {@code POST /api/documents/batch}
+ * (ingestão de todos os arquivos de uma pasta do servidor).
+ */
 @Validated
 @RestController
 @RequestMapping(path = "/api/documents", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -30,6 +35,11 @@ public class DocumentController {
         this.documentIngestionService = documentIngestionService;
     }
 
+    /**
+     * Recebe um arquivo via multipart/form-data, salva temporariamente em
+     * {@code target/uploads}, delega a ingestão de fato ao serviço e, no
+     * fim (sucesso ou falha), remove o arquivo temporário.
+     */
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public IngestionResult upload(@RequestPart("file") MultipartFile file) {
         if (file.isEmpty() || file.getOriginalFilename() == null || file.getOriginalFilename().isBlank()) {
@@ -52,6 +62,7 @@ public class DocumentController {
         }
     }
 
+    /** Ingesta em lote todos os arquivos suportados dentro de um diretório já existente no servidor. */
     @PostMapping(path = "/batch", consumes = MediaType.APPLICATION_JSON_VALUE)
     public List<IngestionResult> batch(@Valid @RequestBody BatchIngestionRequest request) {
         return documentIngestionService.ingestDirectory(Path.of(request.directoryPath()));

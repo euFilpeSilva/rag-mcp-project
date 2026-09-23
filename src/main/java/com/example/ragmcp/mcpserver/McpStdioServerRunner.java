@@ -30,6 +30,31 @@ import tools.jackson.databind.json.JsonMapper;
  * estiver habilitada. Em modo REST normal ela deve permanecer desabilitada para evitar
  * interferência no stdout, reservado ao protocolo MCP.
  */
+/**
+ * Inicia o servidor MCP via stdio apenas quando a flag {@code mcp.server.stdio-enabled}
+ * estiver habilitada. Em modo REST normal ela deve permanecer desabilitada para evitar
+ * interferência no stdout, reservado ao protocolo MCP.
+ *
+ * <p><b>O que é MCP?</b> Model Context Protocol é um padrão que permite a
+ * clientes de IA (ex: Claude Desktop) "descobrirem" e chamarem
+ * ferramentas externas de forma padronizada. Aqui, este projeto atua
+ * como <b>servidor</b> MCP: expõe o RAG local como três "ferramentas"
+ * que qualquer cliente MCP compatível pode chamar:</p>
+ * <ul>
+ *   <li>{@code ask_question} — pergunta em linguagem natural, resposta
+ *       do {@code RagQueryService} (equivalente ao {@code POST /api/chat}).</li>
+ *   <li>{@code search_documents} — busca bruta de chunks (sem LLM),
+ *       útil para o cliente MCP montar seu próprio prompt.</li>
+ *   <li>{@code ingest_document} — permite ao cliente MCP mandar
+ *       ingerir um novo arquivo diretamente.</li>
+ * </ul>
+ *
+ * <p>A comunicação acontece via <b>stdio</b> (entrada/saída padrão do
+ * processo), não via HTTP — por isso o protocolo é sensível a qualquer
+ * outra coisa que escreva no {@code System.out} (por isso os logs deste
+ * runner usam {@code System.err}, e por isso este modo fica desabilitado
+ * por padrão quando rodamos como API REST comum).</p>
+ */
 @Component
 public class McpStdioServerRunner {
 
@@ -52,6 +77,11 @@ public class McpStdioServerRunner {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * Executado automaticamente pelo Spring logo após a construção do
+     * bean ({@code @PostConstruct}). Só efetivamente inicia o servidor
+     * MCP se a flag estiver ligada; caso contrário, não faz nada.
+     */
     @PostConstruct
     void startIfEnabled() {
         if (!stdioEnabled) {
@@ -76,6 +106,7 @@ public class McpStdioServerRunner {
         System.err.println("MCP stdio server iniciado com 3 ferramentas.");
     }
 
+    /** Fecha a conexão MCP de forma limpa quando a aplicação é encerrada. */
     @PreDestroy
     void shutdown() {
         if (server != null) {
@@ -84,6 +115,7 @@ public class McpStdioServerRunner {
         }
     }
 
+    /** Empacota uma definição de ferramenta MCP junto com o handler que efetivamente a executa. */
     private McpServerFeatures.SyncToolSpecification syncTool(
             McpSchema.Tool tool,
             ToolHandler handler) {
@@ -93,6 +125,11 @@ public class McpStdioServerRunner {
                 .build();
     }
 
+    /**
+     * Wrapper comum de execução: loga início/fim/erro de cada chamada de
+     * ferramenta e converte o resultado (ou exceção) para o formato que o
+     * protocolo MCP espera ({@code CallToolResult}).
+     */
     private McpSchema.CallToolResult executeTool(
             String toolName,
             Map<String, Object> arguments,
@@ -124,6 +161,7 @@ public class McpStdioServerRunner {
         }
     }
 
+    /** Handler da ferramenta {@code ask_question}: delega direto ao RagQueryService. */
     private Object handleAskQuestion(Map<String, Object> arguments) {
         String question = requiredString(arguments, "question");
         String sessionId = string(arguments, "sessionId");
@@ -133,16 +171,24 @@ public class McpStdioServerRunner {
         return ragQueryService.ask(sessionId, question);
     }
 
+    /** Handler da ferramenta {@code search_documents}: retorna só os chunks, sem chamar o LLM. */
     private Object handleSearchDocuments(Map<String, Object> arguments) {
         String query = requiredString(arguments, "query");
         int topK = integer(arguments, "topK", 4);
         return ragQueryService.search(query, topK);
     }
 
+    /** Handler da ferramenta {@code ingest_document}: ingere um arquivo já presente no servidor. */
     private Object handleIngestDocument(Map<String, Object> arguments) {
         String filePath = requiredString(arguments, "filePath");
         return documentIngestionService.ingestFile(Path.of(filePath));
     }
+
+    // As três definições abaixo (askQuestionTool, searchDocumentsTool,
+    // ingestDocumentTool) descrevem o "contrato" de cada ferramenta em
+    // JSON Schema — nome, descrição e parâmetros esperados. É esse
+    // schema que um cliente MCP usa para saber como chamar a ferramenta
+    // corretamente (ex: quais campos são obrigatórios).
 
     private McpSchema.Tool askQuestionTool() {
         return McpSchema.Tool.builder()
