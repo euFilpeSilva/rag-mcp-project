@@ -20,6 +20,7 @@ para a visão geral e os links para cada módulo.
 | [03-mcp-server.md](specs/03-mcp-server.md) | Servidor MCP (expõe o RAG como ferramentas) |
 | [04-mcp-client.md](specs/04-mcp-client.md) | Cliente MCP (fallback com ferramentas externas) |
 | [05-api-contracts.md](specs/05-api-contracts.md) | Contratos REST |
+| [06-whatsapp-integration.md](specs/06-whatsapp-integration.md) | Webhook WhatsApp (Twilio Sandbox) |
 
 ## Pré-requisitos
 - Java 21
@@ -42,6 +43,36 @@ mvn spring-boot:run
 ```
 A API sobe em `http://localhost:8080`. Veja os contratos em
 `specs/05-api-contracts.md`.
+
+## Testando um chatbot no WhatsApp (gratuito)
+O projeto expõe `POST /webhook/whatsapp/twilio`, compatível com o
+**Twilio WhatsApp Sandbox** (spec 06). Para testar cenários reais no
+WhatsApp sem custo:
+
+1. Rode a aplicação localmente (`mvn spring-boot:run`).
+2. Crie uma conta gratuita em https://www.twilio.com/try-twilio e ative o
+   **WhatsApp Sandbox** (Messaging → Try it out → Send a WhatsApp
+   message). Você receberá um código tipo `join palavra-exemplo`.
+3. Exponha a porta 8080 publicamente com um túnel gratuito, ex:
+   ```bash
+   ngrok http 8080
+   ```
+   Copie a URL HTTPS gerada (ex: `https://abcd1234.ngrok-free.app`).
+4. No console do Twilio Sandbox, em "WHEN A MESSAGE COMES IN", configure:
+   ```
+   https://abcd1234.ngrok-free.app/webhook/whatsapp/twilio
+   ```
+   (método `HTTP POST`).
+5. Pelo seu WhatsApp pessoal, envie `join palavra-exemplo` para o número
+   do sandbox exibido no console do Twilio.
+6. Envie perguntas normalmente — cada número de telefone vira uma sessão
+   independente do RAG (histórico preservado por contato).
+
+Isso é 100% gratuito para testes: Twilio Sandbox e ngrok não cobram nesse
+uso. Não é adequado para produção (o sandbox expira periodicamente e
+exige reenviar o `join`); para produção, migre para o **Meta WhatsApp
+Cloud API** (também tem camada gratuita) ou para uma conta paga do
+Twilio. Detalhes do contrato do webhook em `specs/06-whatsapp-integration.md`.
 
 ## Rodando como servidor MCP (stdio)
 Para expor o RAG como ferramentas MCP (para uso em clientes como Claude
@@ -76,6 +107,7 @@ src/main/java/com/example/ragmcp/
   mcpserver/  -> spec 03
   mcpclient/  -> spec 04
   api/        -> spec 05
+  whatsapp/   -> spec 06
 ```
 
 ## Desenvolvimento (spec-driven)
