@@ -1,0 +1,36 @@
+spring:
+  application:
+    name: rag-mcp-project
+  datasource:
+    url: jdbc:postgresql://localhost:5432/ragmcp
+    username: ragmcp
+    password: ragmcp
+  sql:
+    init:
+      mode: always
+      continue-on-error: true
+
+server:
+  port: 8080
+
+rag:
+  ollama:
+    base-url: http://localhost:11434
+    chat-model: llama3.1
+    embedding-model: nomic-embed-text
+  retrieval:
+    top-k: 4
+    min-similarity: 0.5
+  chunk:
+    max-tokens: 500
+    overlap-tokens: 50
+
+mcp:
+  server:
+    stdio-enabled: false
+  client:
+    config-file: mcp-servers-config.json
+
+logging:
+  level:
+    com.example.ragmcp: INFO

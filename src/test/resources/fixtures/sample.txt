@@ -1,0 +1,2 @@
+Spring Boot com LangChain4j usa recuperacao vetorial com pgvector.
+Este arquivo reforca termos sobre servidor MCP, ingestao e consultas RAG.
